@@ -4,6 +4,7 @@ import zipfile
 import PyPDF2
 import fitz  # PyMuPDF
 import uuid
+from pydantic import BaseModel
 from typing import List
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -221,4 +222,20 @@ async def unlock_pdf(file: UploadFile = File(...), password: str = Form(...)):
         
     except Exception as e:
         print(f"⚠️ Error: {e}")
+        return {"status": "error", "message": str(e)}
+
+class ChatRequest(BaseModel):
+    message: str
+
+@app.post("/api/chat")
+async def chat_with_ai(request: ChatRequest):
+    try:
+        # The client automatically picks up the GEMINI_API_KEY from Render's environment variables
+        client = genai.Client()
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=request.message,
+        )
+        return {"status": "success", "reply": response.text}
+    except Exception as e:
         return {"status": "error", "message": str(e)}
