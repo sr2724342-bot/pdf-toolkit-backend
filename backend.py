@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from google import genai
 
 # --- Configuration ---
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6Ih6eBd764UhA9cvxgR6_cAn6NyOJx03kciO2O0yrB5yA")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBUYSPTkZ2dblz10EUzCcccK6qLWgFJz5Q")
 
 if os.environ.get("GEMINI_API_KEY") is None:
     client = genai.Client(api_key=GEMINI_KEY)
