@@ -243,3 +243,29 @@ async def chat_with_ai(request: ChatRequest):
         return {"status": "success", "reply": response.text}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+# Add this new endpoint for file uploads
+@app.post("/api/chat/file")
+async def chat_with_file(file: UploadFile = File(...), message: str = Form("Please summarize this document in detail.")):
+    try:
+        my_api_key = os.environ.get("GEMINI_API_KEY")
+        client = genai.Client(api_key=my_api_key)
+        
+        # 1. Extract text from the uploaded PDF
+        pdf_bytes = await file.read()
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        extracted_text = ""
+        for page in doc:
+            extracted_text += page.get_text()
+            
+        # 2. Combine the user's prompt with the document text
+        full_prompt = f"{message}\n\n--- Document Content ---\n{extracted_text}"
+        
+        # 3. Send to Gemini
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=full_prompt,
+        )
+        return {"status": "success", "reply": response.text}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
