@@ -230,8 +230,12 @@ class ChatRequest(BaseModel):
 @app.post("/api/chat")
 async def chat_with_ai(request: ChatRequest):
     try:
-        # The client automatically picks up the GEMINI_API_KEY from Render's environment variables
-        client = genai.Client()
+        # Explicitly fetch the key from Render's environment
+        my_api_key = os.environ.get("GEMINI_API_KEY")
+        
+        # Force the client to use the API key instead of OAuth
+        client = genai.Client(api_key=my_api_key)
+        
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=request.message,
