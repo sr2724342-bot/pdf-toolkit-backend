@@ -1,0 +1,224 @@
+import os
+import io
+import zipfile
+import PyPDF2
+import fitz  # PyMuPDF
+import uuid
+from typing import List
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from google import genai
+
+# --- Configuration ---
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6Ih6eBd764UhA9cvxgR6_cAn6NyOJx03kciO2O0yrB5yA")
+
+if os.environ.get("GEMINI_API_KEY") is None:
+    client = genai.Client(api_key=GEMINI_KEY)
+else:
+    client = genai.Client()
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def read_root():
+    return {"message": "PDF Toolkit Backend is running!"}
+
+# ==========================================
+# ENDPOINT: AI PDF SUMMARY (Single File)
+# ==========================================
+@app.post("/api/summarize")
+async def summarize_pdf(file: UploadFile = File(...)):
+    try:
+        text = ""
+        pdf_reader = PyPDF2.PdfReader(file.file)
+        for page in pdf_reader.pages:
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted + "\n"
+        
+        if not text.strip():
+            return {"status": "error", "message": "Could not extract any text from this PDF."}
+
+        prompt = f"Provide a clear, well-structured summary of this document using bullet points:\n\n{text}"
+        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        
+        return {"status": "success", "result": response.text}
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# ENDPOINT: ADD PASSWORD TO PDF (Single File)
+# ==========================================
+@app.post("/api/lock")
+async def lock_pdf(file: UploadFile = File(...), password: str = Form(...)):
+    try:
+        reader = PyPDF2.PdfReader(file.file)
+        writer = PyPDF2.PdfWriter()
+        
+        for page in reader.pages:
+            writer.add_page(page)
+            
+        writer.encrypt(password)
+        
+        memory_file = io.BytesIO()
+        writer.write(memory_file)
+        memory_file.seek(0)
+            
+        return StreamingResponse(
+            memory_file, 
+            media_type='application/pdf',
+            headers={'Content-Disposition': f'attachment; filename="locked_{file.filename}"'}
+        )
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# ENDPOINT: PDF TO JPG (Single File -> ZIP output)
+# ==========================================
+@app.post("/api/tojpg")
+async def pdf_to_jpg(file: UploadFile = File(...)):
+    try:
+        file_bytes = await file.read()
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        
+        if len(doc) == 0:
+            return {"status": "error", "message": "The uploaded PDF is completely empty."}
+            
+        memory_zip = io.BytesIO()
+        with zipfile.ZipFile(memory_zip, "w") as zf:
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                pix = page.get_pixmap(dpi=150)
+                img_bytes = pix.tobytes("jpg")
+                zf.writestr(f"page_{page_num + 1}.jpg", img_bytes)
+        
+        memory_zip.seek(0)
+        
+        return StreamingResponse(
+            memory_zip, 
+            media_type='application/zip',
+            headers={'Content-Disposition': f'attachment; filename="converted_{file.filename}.zip"'}
+        )
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# NEW ENDPOINT: MERGE PDFs (Multiple Files)
+# ==========================================
+@app.post("/api/merge")
+async def merge_pdfs(files: List[UploadFile] = File(...)):
+    """Receives multiple PDFs and combines them into one."""
+    try:
+        print(f"📑 Merging {len(files)} PDFs...")
+        merger = PyPDF2.PdfMerger()
+        
+        for file in files:
+            file_bytes = await file.read()
+            merger.append(io.BytesIO(file_bytes))
+            
+        memory_file = io.BytesIO()
+        merger.write(memory_file)
+        memory_file.seek(0)
+        
+        print("✅ Merge successful! Sending back to app...")
+        return StreamingResponse(
+            memory_file, 
+            media_type='application/pdf',
+            headers={'Content-Disposition': 'attachment; filename="merged_document.pdf"'}
+        )
+    except Exception as e:
+        print(f"⚠️ Error: {e}")
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# NEW ENDPOINT: JPG TO PDF (Multiple Files)
+# ==========================================
+@app.post("/api/topdf")
+async def jpg_to_pdf(files: List[UploadFile] = File(...)):
+    """Receives multiple images and packs them into a single PDF."""
+    try:
+        print(f"🖼️ Packing {len(files)} images into PDF...")
+        doc = fitz.open() # Create a blank PDF document
+        
+        for file in files:
+            img_bytes = await file.read()
+            
+            # Determine extension based on file name (jpg, png, etc.)
+            ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'jpg'
+            
+            # Open the image with PyMuPDF and convert directly to PDF bytes
+            img_doc = fitz.open(stream=img_bytes, filetype=ext)
+            pdf_bytes = img_doc.convert_to_pdf()
+            img_doc.close()
+            
+            # Insert the newly converted page into the main document
+            temp_pdf = fitz.open("pdf", pdf_bytes)
+            doc.insert_pdf(temp_pdf)
+            temp_pdf.close()
+            
+        memory_file = io.BytesIO()
+        doc.save(memory_file)
+        memory_file.seek(0)
+        
+        print("✅ Conversion successful! Sending back to app...")
+        return StreamingResponse(
+            memory_file, 
+            media_type='application/pdf',
+            headers={'Content-Disposition': 'attachment; filename="converted_images.pdf"'}
+        )
+    except Exception as e:
+        print(f"⚠️ Error: {e}")
+        return {"status": "error", "message": str(e)}
+    
+    # ==========================================
+# ENDPOINT: REMOVE PASSWORD FROM PDF
+# ==========================================
+@app.post("/api/unlock")
+async def unlock_pdf(file: UploadFile = File(...), password: str = Form(...)):
+    """Receives an encrypted PDF and a password, decrypts it, and returns the unlocked file."""
+    try:
+        print(f"🔓 Decrypting file: {file.filename}")
+        
+        reader = PyPDF2.PdfReader(file.file)
+        
+        # 1. Check if the file is actually encrypted
+        if not reader.is_encrypted:
+            return {"status": "error", "message": "This PDF is already unlocked!"}
+            
+        # 2. Attempt to decrypt with the provided password
+        success = reader.decrypt(password)
+        
+        # In PyPDF2, decrypt returns 0 if it fails (wrong password)
+        if success == 0:
+            return {"status": "error", "message": "Incorrect password. Please try again."}
+            
+        # 3. If successful, copy the decrypted pages to a new writer
+        writer = PyPDF2.PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+            
+        # 4. Save to memory and send back
+        memory_file = io.BytesIO()
+        writer.write(memory_file)
+        memory_file.seek(0)
+        
+        print("✅ PDF Decrypted successfully! Sending back to app...")
+        return StreamingResponse(
+            memory_file, 
+            media_type='application/pdf',
+            headers={'Content-Disposition': f'attachment; filename="unlocked_{file.filename}"'}
+        )
+        
+    except Exception as e:
+        print(f"⚠️ Error: {e}")
+        return {"status": "error", "message": str(e)}
