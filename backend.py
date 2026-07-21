@@ -302,7 +302,7 @@ async def extract_metadata(file: UploadFile = File(...)):
 @app.post("/api/watermark")
 async def add_watermark(
     file: UploadFile = File(...), 
-    password: str = Form("CONFIDENTIAL") # Repurposing the Flutter password field for the watermark text
+    password: str = Form("CONFIDENTIAL") 
 ):
     try:
         pdf_bytes = await file.read()
@@ -310,21 +310,21 @@ async def add_watermark(
         
         for page in doc:
             rect = page.rect
-            # Calculate a point for a diagonal watermark
-            point = fitz.Point(rect.width * 0.15, rect.height * 0.75)
+            # Adjusted the point to center the text better horizontally
+            point = fitz.Point(rect.width * 0.15, rect.height * 0.50)
             page.insert_text(
                 point, 
-                password, # This is the text typed into the app
+                password, 
                 fontsize=60, 
-                color=(0.7, 0.7, 0.7), # Light grey color
-                rotate=45
+                color=(0.7, 0.7, 0.7) 
+                # Removed the rotate=45 parameter to prevent the crash
             )
             
         out_bytes = doc.write()
         return Response(content=out_bytes, media_type="application/pdf")
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
+        
 # ==========================================
 # 3. AI OPTICAL CHARACTER RECOGNITION (OCR)
 # ==========================================
