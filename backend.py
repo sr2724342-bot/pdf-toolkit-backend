@@ -334,11 +334,16 @@ async def image_to_text(file: UploadFile = File(...)):
         my_api_key = os.environ.get("GEMINI_API_KEY")
         client = genai.Client(api_key=my_api_key)
         
-        # Use Gemini's multimodal capabilities to read the image directly
+        # Package the image using Google's strict Part type
+        image_part = types.Part.from_bytes(
+            data=image_bytes,
+            mime_type=file.content_type,
+        )
+        
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
-                {"mime_type": file.content_type, "data": image_bytes},
+                image_part,
                 "Extract all the text from this image exactly as it appears. Do not add any extra commentary."
             ]
         )
