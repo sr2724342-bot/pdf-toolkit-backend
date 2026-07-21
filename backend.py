@@ -4,6 +4,7 @@ import zipfile
 import PyPDF2
 import fitz  # PyMuPDF
 import uuid
+from fastapi import Response, Form
 from pydantic import BaseModel
 from typing import List
 from fastapi import FastAPI, UploadFile, File, Form
@@ -267,5 +268,79 @@ async def chat_with_file(file: UploadFile = File(...), message: str = Form("Plea
             contents=full_prompt,
         )
         return {"status": "success", "reply": response.text}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# 1. PDF METADATA INSPECTOR
+# ==========================================
+@app.post("/api/metadata")
+async def extract_metadata(file: UploadFile = File(...)):
+    try:
+        pdf_bytes = await file.read()
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        metadata = doc.metadata
+        
+        # Format the metadata into a clean readable string
+        result_text = "--- PDF Metadata ---\n"
+        for key, value in metadata.items():
+            if value:  # Only show fields that have data
+                result_text += f"{key.capitalize()}: {value}\n"
+        
+        if result_text == "--- PDF Metadata ---\n":
+            result_text = "No metadata found in this document."
+            
+        return {"status": "success", "result": result_text}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# 2. DOCUMENT WATERMARKING
+# ==========================================
+@app.post("/api/watermark")
+async def add_watermark(
+    file: UploadFile = File(...), 
+    password: str = Form("CONFIDENTIAL") # Repurposing the Flutter password field for the watermark text
+):
+    try:
+        pdf_bytes = await file.read()
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        
+        for page in doc:
+            rect = page.rect
+            # Calculate a point for a diagonal watermark
+            point = fitz.Point(rect.width * 0.15, rect.height * 0.75)
+            page.insert_text(
+                point, 
+                password, # This is the text typed into the app
+                fontsize=60, 
+                color=(0.7, 0.7, 0.7), # Light grey color
+                rotate=45
+            )
+            
+        out_bytes = doc.write()
+        return Response(content=out_bytes, media_type="application/pdf")
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==========================================
+# 3. AI OPTICAL CHARACTER RECOGNITION (OCR)
+# ==========================================
+@app.post("/api/imagetotext")
+async def image_to_text(file: UploadFile = File(...)):
+    try:
+        image_bytes = await file.read()
+        my_api_key = os.environ.get("GEMINI_API_KEY")
+        client = genai.Client(api_key=my_api_key)
+        
+        # Use Gemini's multimodal capabilities to read the image directly
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[
+                {"mime_type": file.content_type, "data": image_bytes},
+                "Extract all the text from this image exactly as it appears. Do not add any extra commentary."
+            ]
+        )
+        return {"status": "success", "result": response.text}
     except Exception as e:
         return {"status": "error", "message": str(e)}
