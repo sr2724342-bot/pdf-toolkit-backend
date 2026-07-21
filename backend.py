@@ -1,4 +1,5 @@
 import os
+import mimetypes
 import io
 import zipfile
 import PyPDF2
@@ -334,10 +335,20 @@ async def image_to_text(file: UploadFile = File(...)):
         my_api_key = os.environ.get("GEMINI_API_KEY")
         client = genai.Client(api_key=my_api_key)
         
-        # Package the image using Google's strict Part type
+        # 1. Guess the correct MIME type based on the file extension
+        mime_type, _ = mimetypes.guess_type(file.filename)
+        
+        # 2. Provide a safe fallback if it still reads as a generic stream
+        if not mime_type or mime_type == "application/octet-stream":
+            if file.filename.lower().endswith('.png'):
+                mime_type = "image/png"
+            else:
+                mime_type = "image/jpeg"
+        
+        # 3. Package the image using the corrected MIME type
         image_part = types.Part.from_bytes(
             data=image_bytes,
-            mime_type=file.content_type,
+            mime_type=mime_type,
         )
         
         response = client.models.generate_content(
@@ -349,4 +360,5 @@ async def image_to_text(file: UploadFile = File(...)):
         )
         return {"status": "success", "result": response.text}
     except Exception as e:
+        return {"status": "error", "message": str(e)}
         return {"status": "error", "message": str(e)}
