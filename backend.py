@@ -4,6 +4,7 @@ import zipfile
 import PyPDF2
 import fitz  # PyMuPDF
 import uuid
+from google.genai import types
 from fastapi import Response, Form
 from pydantic import BaseModel
 from typing import List
